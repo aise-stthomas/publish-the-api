@@ -94,9 +94,12 @@ to one CloudWatch log group, and reading it is the first thing you will do whene
 service does something you did not expect.
 
 ```bash
-aws logs tail /aws/lambda/triage-api --since 15m --region us-east-1
+aws logs tail /aws/lambda/triage-api --since 15m --region us-east-1 --format short
 aws logs tail /aws/lambda/triage-api --follow --region us-east-1     # then send a call from Swagger and watch it land
 ```
+
+Lines reach the log a few seconds after the call, and the `REPORT` line last. If the
+newest call is missing, run the command again.
 
 One call, as the log shows it:
 
