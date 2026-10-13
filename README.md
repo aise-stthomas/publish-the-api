@@ -15,6 +15,7 @@ the project repository, and the harness scores its outputs the same way.
 | **In class** | [LAB.md](LAB.md) — *publish the API*: the API, Swagger, the token, the table, the log |
 | **The function** | [src/function/app.py](src/function/app.py) — a FastAPI app, one page; `handler.py` adapts it to Lambda |
 | **The golden set** | [data/golden/README.md](data/golden/README.md) |
+| **The primer** | *API gateway*, in the course guide's supplemental material |
 
 ## What you need
 

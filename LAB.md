@@ -165,7 +165,9 @@ you ever want to; the table stays unless you add `--table`.
 
 ## Background
 
-An **API gateway** is the general component: one front door for a system, owning the
+The one-page primer *API gateway* in the course guide's supplemental material says what
+the component is and what sits on either side of it. In short: an **API gateway** is the
+general component: one front door for a system, owning the
 public URL, the routes, authentication, throttling, and the access log. Tonight's
 instance is an HTTP API on API Gateway in front of a Lambda function, as of October
 2026, with DynamoDB as the table and CloudWatch as the log. What does not change: the
