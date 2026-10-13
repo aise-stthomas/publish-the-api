@@ -1,0 +1,16 @@
+[project]
+name = "publish-the-api"
+version = "0.1.0"
+description = "AI Systems Engineering lab: put an API gateway in front of the triage function, publish the URL, and call each other."
+requires-python = ">=3.12"
+dependencies = [
+    "botocore>=1.43.104",
+    "fastapi>=0.142.0",
+    "google-genai>=2.23",
+    "mangum>=0.22.0",
+    "python-dotenv>=1.0",
+    "uvicorn>=0.54.0",
+]
+
+[tool.uv]
+package = false

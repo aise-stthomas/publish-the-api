@@ -1,0 +1,80 @@
+# Publish the API
+
+A chat turn with Gemini and the support-ticket triage step go behind an **API gateway**
+with a public URL, in your AWS Academy Learner Lab, with a Swagger page to try them
+from. You reach it from your phone, call it over the golden set, and call a classmate's.
+The deployment you leave running is where the next project starts.
+
+The system under test is unchanged: `src/system/triage.py` is the same frozen file as in
+the project repository, and the harness scores its outputs the same way.
+
+| | |
+|---|---|
+| **In class** | [LAB.md](LAB.md) — *publish the API* |
+| **The function** | [src/function/app.py](src/function/app.py) — a FastAPI app, one page; `handler.py` adapts it to Lambda |
+| **The golden set** | [data/golden/README.md](data/golden/README.md) |
+
+## What you need
+
+- Python 3.12 or newer, and [`uv`](https://docs.astral.sh/uv/).
+- Your Gemini key, in `.env`.
+- The AWS CLI (`brew install awscli`, or see *Configuring AWS* in the course guide), and a
+  **running Learner Lab session** with its credentials pasted into `~/.aws/credentials`.
+  Sessions last about four hours; what you deploy outlives them.
+
+Part 1 needs none of the AWS items. If AWS is not working for you tonight, do Part 1,
+then use a classmate's URL for the rest.
+
+## Setup, once
+
+```bash
+git clone https://github.com/aise-stthomas/publish-the-api
+cd publish-the-api
+cp .env.example .env         # paste your Gemini key
+uv sync
+uv run src/function/handler.py   # the function, through the Lambda path, with the fake provider
+```
+
+## The loop
+
+```bash
+./deploy.sh                                 # build, deploy the function, put the API in front, print the URLs
+./call.sh                                   # one ticket, plain curl
+uv run record.py --provider http --runs 3   # call the API over the golden set; data/fixtures/http/
+uv run score.py local http                  # the same scorers as the project
+uv run latency.py http                      # cold start · warm p50 and p95 · errors
+./deploy.sh --throttle 2 5 && uv run storm.py   # the gateway's own dial
+```
+
+## The files
+
+```
+record.py             CLI: run the suite, in this process or over HTTP, yours or a classmate's; saves every call
+score.py              CLI: reads the fixtures and reports, per slice; never calls a model
+latency.py            CLI: the three numbers, per run, from the fixtures
+storm.py              CLI: many requests at once; counts 200s and 429s
+deploy.sh             builds the zip, creates or updates the function, creates the HTTP API in front of it; --throttle
+call.sh               one plain curl to the API
+teardown.sh           deletes the API and the function; clears build/ and the URL from .env
+
+src/                  the code
+  system/             the system under test, frozen. Deployed as-is.
+  function/
+    app.py            the FastAPI app: GET / and /docs open · POST /chat and POST /triage behind the token
+    handler.py        the Lambda entry point: Mangum(app); run it directly to exercise the Lambda path with no AWS
+    local_server.py   the same app on http://127.0.0.1:9000 with Swagger at /docs
+    sample-event-body.json   the example request
+  harness/            golden set loader, fixtures, scorers, the report
+
+data/                 the inputs and the outputs
+  golden/             the ten tickets and their accounts
+  fixtures/           every recorded call, by condition and run. Committed.
+```
+
+## What this is one instance of
+
+An API gateway is the component that faces the internet for a system: the URL, the
+routes, the throttle, the access log. Tonight's is an HTTP API on API Gateway in front of
+a Lambda function, as of October 2026. What does not change: the public edge never holds
+the model key; a caller's contract is the URL and the request shape; and the edge is
+where a system first says no.
