@@ -180,6 +180,7 @@ recorded somewhere that outlives the request.
 | Symptom | Likely cause | What to do |
 |---|---|---|
 | `deploy.sh`: `sts get-caller-identity failed` | the Learner Lab session expired, or credentials were not pasted | start the session, paste fresh credentials, run it again |
+| AWS is not working for you tonight | | use the instructor's deployment for Parts 3 to 6: Swagger at https://kseaj1b5k0.execute-api.us-east-1.amazonaws.com/docs; the token is given out in class, never in this repository |
 | `/docs` works on the laptop but not on the phone | the phone's network blocks it, or the URL was mistyped | try mobile data; copy the URL from `deploy.sh`'s output and add `/docs` |
 | `POST /chat` or `/triage` answers `401` | the token is wrong or missing | the value is `LAB_TOKEN` in `.env`; for a classmate's API use theirs |
 | `502` or `503` from `/chat` | the vendor refused: a dead key or a daily cap | check the Gemini key in `.env`, `./deploy.sh` again; look at the log |

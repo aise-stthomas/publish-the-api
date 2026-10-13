@@ -26,7 +26,9 @@ the project repository, and the harness scores its outputs the same way.
   Sessions last about four hours; what you deploy outlives them.
 
 Part 1 needs none of the AWS items. If AWS is not working for you tonight, do Part 1,
-then use a classmate's URL for the rest.
+then use a classmate's URL for the rest, or the instructor's: the Swagger page is at
+https://kseaj1b5k0.execute-api.us-east-1.amazonaws.com/docs and the token is given out
+in class.
 
 ## Setup, once
 
