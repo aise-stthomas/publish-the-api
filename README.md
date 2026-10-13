@@ -2,16 +2,17 @@
 
 A chat turn with Gemini and the support-ticket triage step go behind an **API gateway**
 with a public URL, in your AWS Academy Learner Lab, with a Swagger page to try them
-from, and every call lands in a **DynamoDB inference table**. You reach it from your
-phone, call it over the golden set, read the table back, and call a classmate's. The
-deployment you leave running is where the next project starts.
+from and a token on the model routes. Every call lands in a **DynamoDB inference
+table** and writes a line to the function's **log**. You reach it from your phone, read
+the table and the log, and call a classmate's. The deployment you leave running is where
+the next project starts.
 
 The system under test is unchanged: `src/system/triage.py` is the same frozen file as in
 the project repository, and the harness scores its outputs the same way.
 
 | | |
 |---|---|
-| **In class** | [LAB.md](LAB.md) — *publish the API* |
+| **In class** | [LAB.md](LAB.md) — *publish the API*: the API, Swagger, the token, the table, the log |
 | **The function** | [src/function/app.py](src/function/app.py) — a FastAPI app, one page; `handler.py` adapts it to Lambda |
 | **The golden set** | [data/golden/README.md](data/golden/README.md) |
 
@@ -39,14 +40,15 @@ uv run src/function/handler.py   # the function, through the Lambda path, with t
 ## The loop
 
 ```bash
-./deploy.sh                                 # build, deploy the function, put the API in front, print the URLs
-./call.sh                                   # one ticket, plain curl
-uv run record.py --provider http --runs 3   # call the API over the golden set; data/fixtures/http/
-uv run score.py local http                  # the same scorers as the project
-uv run latency.py http                      # cold start · warm p50 and p95 · errors
+./deploy.sh                                 # the table, the function, the API in front; prints the URL
+./call.sh                                   # one ticket, plain curl: the URL and the token
 uv run inferences.py                        # today's rows from the inference table, and a summary
-./deploy.sh --throttle 2 5 && uv run storm.py   # the gateway's own dial
+aws logs tail /aws/lambda/triage-api --since 15m --region us-east-1   # the log
 ```
+
+Also here, from the earlier labs, if you want them: `record.py` runs the golden set over
+the API and saves every call, `score.py` scores the recordings, `latency.py` reports the
+round trip, and `storm.py` with `./deploy.sh --throttle` shows the gateway's throttle.
 
 ## The files
 
