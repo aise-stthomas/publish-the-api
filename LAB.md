@@ -119,8 +119,10 @@ uv run storm.py --n 30       # 30 requests at once to GET /: count the 200s and 
 ```
 
 Every `429` was answered by the gateway; the function never ran and nothing was spent.
-The setting takes a little while to reach the edge in both directions, so if the first
-storm is all `200`, wait and storm again.
+The setting takes minutes to reach the edge, in both directions, and the gateway applies
+it on a best-effort basis, so a storm right after the change is usually all `200`. Set
+it, do Part 5, then come back and storm again. If you still see no `429`, the mechanism
+is still the point: write down what you set and what you observed.
 
 ## Leave it running
 
