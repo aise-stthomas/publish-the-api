@@ -2,8 +2,9 @@
 
 A chat turn with Gemini and the support-ticket triage step go behind an **API gateway**
 with a public URL, in your AWS Academy Learner Lab, with a Swagger page to try them
-from. You reach it from your phone, call it over the golden set, and call a classmate's.
-The deployment you leave running is where the next project starts.
+from, and every call lands in a **DynamoDB inference table**. You reach it from your
+phone, call it over the golden set, read the table back, and call a classmate's. The
+deployment you leave running is where the next project starts.
 
 The system under test is unchanged: `src/system/triage.py` is the same frozen file as in
 the project repository, and the harness scores its outputs the same way.
@@ -43,6 +44,7 @@ uv run src/function/handler.py   # the function, through the Lambda path, with t
 uv run record.py --provider http --runs 3   # call the API over the golden set; data/fixtures/http/
 uv run score.py local http                  # the same scorers as the project
 uv run latency.py http                      # cold start · warm p50 and p95 · errors
+uv run inferences.py                        # today's rows from the inference table, and a summary
 ./deploy.sh --throttle 2 5 && uv run storm.py   # the gateway's own dial
 ```
 
@@ -53,14 +55,15 @@ record.py             CLI: run the suite, in this process or over HTTP, yours or
 score.py              CLI: reads the fixtures and reports, per slice; never calls a model
 latency.py            CLI: the three numbers, per run, from the fixtures
 storm.py              CLI: many requests at once; counts 200s and 429s
-deploy.sh             builds the zip, creates or updates the function, creates the HTTP API in front of it; --throttle
+inferences.py         CLI: read the inference table, by day; a summary per build and route
+deploy.sh             creates the inference table, builds the zip, creates or updates the function, creates the HTTP API; --throttle
 call.sh               one plain curl to the API
 teardown.sh           deletes the API and the function; clears build/ and the URL from .env
 
 src/                  the code
   system/             the system under test, frozen. Deployed as-is.
   function/
-    app.py            the FastAPI app: GET / and /docs open · POST /chat and POST /triage behind the token
+    app.py            the FastAPI app: GET / and /docs open · POST /chat and POST /triage behind the token · one row per call to the table
     handler.py        the Lambda entry point: Mangum(app); run it directly to exercise the Lambda path with no AWS
     local_server.py   the same app on http://127.0.0.1:9000 with Swagger at /docs
     sample-event-body.json   the example request

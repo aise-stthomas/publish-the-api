@@ -3,9 +3,10 @@
 Tonight your model goes behind a **public URL**. A serverless function in your Learner
 Lab holds the Gemini key and two routes, a chat turn and the triage step, and an **API
 gateway** in front of it gives the function an address anyone on the internet can reach,
-with a Swagger page to try it from. By the end you have **a URL**, **a Swagger page you
-can open on your phone**, and **a classmate's URL you have called**. The next project
-starts from what you leave running tonight.
+with a Swagger page to try it from. Every call the function handles lands as one row in
+a **DynamoDB table**, the inference table. By the end you have **a URL**, **a Swagger
+page you can open on your phone**, **a classmate's URL you have called**, and **a table
+of every inference**. The next project starts from what you leave running tonight.
 
 **What this lab shows.**
 
@@ -17,6 +18,9 @@ starts from what you leave running tonight.
    system is a system to someone else.
 3. **The key stays inside.** Your Gemini key is in the function's environment, behind
    the gateway. The token at the edge is the only secret a caller ever holds.
+4. **Every inference is a row.** The function writes what happened on every call, never
+   what was said, to a table that outlives the request. That table is the serving log
+   from the lectures, and it is where the next project's measurement reads from.
 
 ## Part 1: run it on your laptop
 
@@ -43,10 +47,10 @@ Start a Learner Lab session and paste its credentials into `~/.aws/credentials`
 ./deploy.sh
 ```
 
-The script builds the package, creates the function, and puts an **HTTP API** in front
-of it: one route for every path and method, proxied to the function, so the same app
-you ran locally now answers at a public address. It prints the URL and saves it, and a
-token, in `.env`.
+The script creates the **inference table** in DynamoDB, builds the package, creates
+the function, and puts an **HTTP API** in front of it: one route for every path and
+method, proxied to the function, so the same app you ran locally now answers at a
+public address. It prints the URL and saves it, and a token, in `.env`.
 
 ## Part 3: reach it from anywhere
 
@@ -63,7 +67,37 @@ secret a caller holds. Then from the terminal:
 uv run record.py --provider http --runs 3 && uv run score.py local http && uv run latency.py http
 ```
 
-## Part 4: call a classmate's
+## Part 4: read the inference table
+
+Every call you just made is a row. Read them back:
+
+```bash
+uv run inferences.py                 # today's rows, in order, then a summary per build and route
+uv run inferences.py --json          # the rows as JSON lines, for your own scripts
+uv run inferences.py --save          # also write them to data/inference/<day>.jsonl
+```
+
+A row holds what happened, never what was said: the time, the route, the build that
+answered, cold start, latency, the action, the amount, whether the output parsed, any
+error. The partition key is the day and the sort key is the time, so one day is one
+query. The same query, two other ways:
+
+- **The console.** DynamoDB → Tables → `triage-inferences` → *Explore table items*.
+  Filter on `day` to see one day.
+- **The CLI.**
+
+  ```bash
+  aws dynamodb query --table-name triage-inferences --region us-east-1 \
+    --key-condition-expression "#d = :d" --expression-attribute-names '{"#d":"day"}' \
+    --expression-attribute-values "{\":d\":{\"S\":\"$(date -u +%Y-%m-%d)\"}}" --output table
+  ```
+
+Find the row for the call you made from your phone, and the cold start from your first
+call. Then compare the summary's p95 with what `latency.py` said: one is measured inside
+the function, the other from your laptop, and the difference is the network and the
+gateway.
+
+## Part 5: call a classmate's
 
 Swap with another team: your URL and your token for theirs. Open their Swagger page,
 send them a message with `POST /chat`, then run your golden set against their triage:
@@ -76,7 +110,7 @@ uv run score.py http classmate
 
 Same tickets, same scorers, a system someone else runs.
 
-## Part 5 (if there is time): the gateway's own dial
+## Part 6 (if there is time): the gateway's own dial
 
 ```bash
 ./deploy.sh --throttle 2 5   # 2 requests a second, a burst of 5; give it half a minute to apply
@@ -90,14 +124,16 @@ storm is all `200`, wait and storm again.
 
 ## Leave it running
 
-The next project builds on this deployment, so leave it up: the function and the API
-cost nothing while idle. `./teardown.sh` removes everything if you ever want to.
+The next project builds on this deployment, so leave it up: the function, the API and
+the table cost nothing while idle. `./teardown.sh` removes the function and the API if
+you ever want to; the table stays unless you add `--table`.
 
 ## Keep
 
 - your URL, and whether `/docs` opened on your phone
 - one `/chat` reply, from the Swagger page
 - `score.py http classmate`: your deployment and theirs on the same golden set
+- one row from the inference table, and the summary's p95 beside `latency.py`'s
 
 ## Background
 
@@ -117,3 +153,4 @@ not the implementation; and the edge is where a system first says no.
 | `POST /chat` or `/triage` answers `401` | the token is wrong or missing | the value is `LAB_TOKEN` in `.env`; for a classmate's API use theirs |
 | `502` or `503` from `/chat` | the vendor refused: a dead key or a daily cap | check the Gemini key in `.env`, `./deploy.sh` again; `aws logs tail /aws/lambda/triage-api --since 10m` |
 | the first call takes seconds | a cold start: the runtime and the SDK loading | call again; the second is warm |
+| `inferences.py` shows no rows | the write failed, or it is after midnight UTC | `aws logs tail /aws/lambda/triage-api --since 10m` and look for `inference_table`; try `--days 2` |

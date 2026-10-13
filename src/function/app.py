@@ -23,13 +23,40 @@ if _ROOT not in sys.path:  # the repository root, so "src.system" resolves here 
     sys.path.insert(0, _ROOT)
 
 _T0 = time.perf_counter()
-from fastapi import Depends, FastAPI, HTTPException  # noqa: E402
+from fastapi import Depends, FastAPI, HTTPException, Request  # noqa: E402
 from fastapi.security import APIKeyHeader  # noqa: E402
 from pydantic import BaseModel, Field  # noqa: E402
 from src.system.triage import DEFAULT_MODEL, triage  # noqa: E402
 from google import genai  # noqa: E402, F401  (load the SDK now, so import time is part of the cold start)
 
 INIT_MS = round((time.perf_counter() - _T0) * 1000)
+BUILD = os.environ.get("BUILD", os.environ.get("DEPLOYED_AT", "local"))
+_TABLE = os.environ.get("INFERENCES_TABLE")
+_DDB = None
+
+
+def record_inference(request: Request, route: str, started: float, cold: bool, **fields) -> None:
+    """One item per call, into the inference table. What happened, never what was said: no
+    ticket text, no reply text. A failed write is logged and never fails the request."""
+    import datetime as dt
+    global _DDB
+    ctx = request.scope.get("aws.context")
+    rid = getattr(ctx, "aws_request_id", None) if ctx else None
+    now = dt.datetime.now(dt.timezone.utc)
+    item = {"day": now.strftime("%Y-%m-%d"), "ts": now.strftime("%H:%M:%S.%f") + "#" + (rid or "local"),
+            "request_id": rid or "local", "route": route, "build": BUILD, "cold_start": cold,
+            "elapsed_ms": round((time.perf_counter() - started) * 1000), **fields}
+    print("INFERENCE " + json.dumps(item))
+    if not _TABLE:
+        return
+    try:
+        import boto3  # in the Lambda runtime; optional on a laptop
+        from decimal import Decimal
+        if _DDB is None:
+            _DDB = boto3.resource("dynamodb").Table(_TABLE)
+        _DDB.put_item(Item={k: (Decimal(str(v)) if isinstance(v, float) else v) for k, v in item.items() if v is not None})
+    except Exception as e:
+        print(json.dumps({"level": "warn", "inference_table": f"{type(e).__name__}: {e}"[:200]}))
 INVOCATIONS = 0   # module state survives between warm invocations of the same sandbox
 
 app = FastAPI(title="triage-api", version="1.0", description="A chat turn and the support-ticket triage step, behind a public API.")
@@ -74,7 +101,7 @@ def check_token(x_lab_token: str | None = Depends(_token_header)) -> None:
 
 def _meta(started: float, cold: bool) -> dict:
     return {"cold_start": cold, "init_ms": INIT_MS, "elapsed_ms": round((time.perf_counter() - started) * 1000),
-            "invocation": INVOCATIONS, "model": DEFAULT_MODEL, "provider": os.environ.get("PROVIDER", "gemini")}
+            "invocation": INVOCATIONS, "model": DEFAULT_MODEL, "provider": os.environ.get("PROVIDER", "gemini"), "build": BUILD}
 
 
 @app.get("/")
@@ -85,7 +112,7 @@ def health() -> dict:
 
 
 @app.post("/chat")
-def chat(req: ChatRequest, _: None = Depends(check_token)) -> dict:
+def chat(req: ChatRequest, request: Request, _: None = Depends(check_token)) -> dict:
     """One turn with the model: your message in, its reply out. No memory between calls: a
     conversation is a list of turns the caller keeps and sends back, which is a later lesson."""
     global INVOCATIONS
@@ -96,22 +123,24 @@ def chat(req: ChatRequest, _: None = Depends(check_token)) -> dict:
     except SystemExit as e:
         raise HTTPException(status_code=503, detail=str(e))
     except Exception as e:  # the vendor said no: say what it said, in the status the caller can act on
+        record_inference(request, "chat", started, cold, error=type(e).__name__, model=DEFAULT_MODEL)
         raise HTTPException(status_code=502, detail=f"{type(e).__name__}: {e}"[:300])
     latency_ms = round((time.perf_counter() - t0) * 1000)
-    print(json.dumps({"level": "info", "route": "chat", "cold_start": cold, "latency_ms": latency_ms, "chars": len(reply)}))
+    record_inference(request, "chat", started, cold, latency_ms=latency_ms, chars=len(reply), model=DEFAULT_MODEL)
     return {"reply": reply, "model": DEFAULT_MODEL, "latency_ms": latency_ms, "function": _meta(started, cold)}
 
 
 @app.post("/triage")
-def triage_endpoint(req: TriageRequest, _: None = Depends(check_token)) -> dict:
+def triage_endpoint(req: TriageRequest, request: Request, _: None = Depends(check_token)) -> dict:
     global INVOCATIONS
     started = time.perf_counter(); cold = INVOCATIONS == 0; INVOCATIONS += 1
     provider = os.environ.get("PROVIDER", "gemini")   # PROVIDER=fake for a dry run with no key
     try:
         rec = triage(req.ticket, req.account, provider=provider, policy_in=req.policy_in)
     except SystemExit as e:  # plumbing.py gives up on a daily cap or a dead provider
+        record_inference(request, "triage", started, cold, error="provider", model=DEFAULT_MODEL)
         raise HTTPException(status_code=503, detail=str(e))
     rec["function"] = _meta(started, cold)
-    print(json.dumps({"level": "info", "cold_start": cold, "action": rec["action"],
-                      "latency_ms": rec["latency_ms"], "elapsed_ms": rec["function"]["elapsed_ms"]}))
+    record_inference(request, "triage", started, cold, latency_ms=rec["latency_ms"], action=rec["action"],
+                     refund_amount=rec.get("refund_amount"), parsed=rec["action"] != "error", model=rec.get("model"), policy_in=req.policy_in)
     return rec

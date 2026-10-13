@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Deploy the triage step as a function with an API gateway in front of it, in the AWS Academy Learner Lab.
+# Deploy the triage step as a function with an API gateway in front of it and a DynamoDB table behind it, in the AWS Academy Learner Lab.
 #
 #   ./deploy.sh                      build the package, create or update the function and the API, print the URL
 #   ./deploy.sh --timeout 3          the same, with a 3-second time limit on the function
@@ -43,7 +43,9 @@ fi
 ACCOUNT="$(aws sts get-caller-identity --query Account --output text 2>/dev/null)" \
   || { echo "aws sts get-caller-identity failed: start a Learner Lab session and paste fresh credentials"; exit 1; }
 ROLE="arn:aws:iam::${ACCOUNT}:role/LabRole"
-ENV_VARS="Variables={GEMINI_API_KEY=${GEMINI_API_KEY},LAB_TOKEN=${LAB_TOKEN},DEPLOYED_AT=$(date +%s)}"
+TABLE="${INFERENCES_TABLE:-triage-inferences}"
+BUILD="$(date -u +%Y-%m-%d.%H%M)"
+ENV_VARS="Variables={GEMINI_API_KEY=${GEMINI_API_KEY},LAB_TOKEN=${LAB_TOKEN},INFERENCES_TABLE=${TABLE},BUILD=${BUILD},DEPLOYED_AT=$(date +%s)}"
 
 api_id() { aws apigatewayv2 get-apis --query "Items[?Name=='${API}'].ApiId | [0]" --output text 2>/dev/null; }
 
@@ -80,6 +82,17 @@ cp -R src build/pkg/src
 find build/pkg/src -name "__pycache__" -type d -prune -exec rm -rf {} +
 ( cd build/pkg && zip -qr ../function.zip . -x '*.pyc' -x '*/__pycache__/*' )
 echo "  $(du -h build/function.zip | cut -f1) zipped, $(du -sh build/pkg | cut -f1) unpacked"
+
+# --- the inference table: one item per call the function handles. On-demand pricing: -----
+# --- nothing while idle, a fraction of a cent per thousand writes. Partition key: the day; -
+# --- sort key: the time plus the request id, so one day's rows come back in order. --------
+if ! aws dynamodb describe-table --table-name "$TABLE" >/dev/null 2>&1; then
+  echo "creating the table $TABLE..."
+  aws dynamodb create-table --table-name "$TABLE" --billing-mode PAY_PER_REQUEST \
+    --attribute-definitions AttributeName=day,AttributeType=S AttributeName=ts,AttributeType=S \
+    --key-schema AttributeName=day,KeyType=HASH AttributeName=ts,KeyType=RANGE >/dev/null
+  aws dynamodb wait table-exists --table-name "$TABLE"
+fi
 
 # --- the function: create or update ----------------------------------------------------
 if aws lambda get-function --function-name "$FN" >/dev/null 2>&1; then
@@ -122,10 +135,11 @@ else
 fi
 
 echo
-echo "deployed: $FN   timeout ${TIMEOUT}s   memory ${MEMORY} MB   behind the API $API ($ID)"
+echo "deployed: $FN   build $BUILD   timeout ${TIMEOUT}s   memory ${MEMORY} MB   behind the API $API ($ID)   inferences → DynamoDB table $TABLE"
 echo "url:      ${URL}/triage   (saved to .env as LAB_URL)"
 echo "health:   ${URL}/        open to anyone: try it from your phone"
 echo
 echo "try it:   ./call.sh src/function/sample-event-body.json      (plain curl: the URL and the token)"
 echo "record:   uv run record.py --provider http --runs 3"
+echo "table:    uv run inferences.py              (today's rows, from DynamoDB)"
 echo "logs:     aws logs tail /aws/lambda/$FN --follow"
