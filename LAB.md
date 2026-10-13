@@ -53,7 +53,8 @@ answers at a public address. It prints the URL and saves it, with a token, in `.
 
 Open the URL `deploy.sh` printed, with `/docs` on the end, **on your phone**, off the
 campus network. Click **Authorize**, paste the `LAB_TOKEN` from your `.env`, and send a
-`POST /chat`. Without the token the route answers `401`.
+`POST /chat`. Without the token the route answers `401`. Send a few more from the page,
+a `POST /triage` among them: those calls are the data the next two parts look at.
 
 From the terminal:
 
@@ -88,16 +89,40 @@ Find the row for the call you made from your phone.
 
 ## Part 5: the logs
 
+The table says what happened. The log says how. Every invocation of the function writes
+to one CloudWatch log group, and reading it is the first thing you will do whenever the
+service does something you did not expect.
+
 ```bash
 aws logs tail /aws/lambda/triage-api --since 15m --region us-east-1
+aws logs tail /aws/lambda/triage-api --follow --region us-east-1     # then send a call from Swagger and watch it land
 ```
 
-Every call wrote a line beginning `INFERENCE`, the same fields as the row. Around it:
-the platform's own `START`, `END` and `REPORT` lines, with the billed duration and, on
-the first call into a new sandbox, the init duration. Find the `INFERENCE` line for your
-phone's call and the `REPORT` line that follows it.
+One call, as the log shows it:
 
-In the console: CloudWatch → Log groups → `/aws/lambda/triage-api`.
+| Line | Written by | What it tells you |
+|---|---|---|
+| `INIT_START` | the platform | a new sandbox: the runtime is loading; this is the cold start |
+| `START RequestId: …` | the platform | the call began; the id is the same one in the table's row |
+| `INFERENCE {…}` | the function | the row, as it was written: route, build, action, latency |
+| `{"level": "warn", …}` | the function | something it survived: a failed table write, a vendor refusal |
+| `END RequestId: …` | the platform | the call finished |
+| `REPORT RequestId: … Duration … Billed Duration … Max Memory Used … Init Duration …` | the platform | what it cost: the time billed, the memory, and on a cold start the init time |
+
+Find the `INFERENCE` line for the call you made from your phone, and the `REPORT` line
+with the same request id. Compare the `Duration` there with the `latency_ms` in the
+`INFERENCE` line: the difference is everything the function did besides wait for the
+model. Then find the cold start: an `INIT_START` and a `REPORT` with an `Init Duration`.
+
+To follow one request, filter on its id:
+
+```bash
+aws logs filter-log-events --log-group-name /aws/lambda/triage-api --region us-east-1 \
+  --filter-pattern "REQUEST_ID" --query 'events[].message' --output text
+```
+
+In the console: CloudWatch → Log groups → `/aws/lambda/triage-api` → the newest log
+stream. One stream per sandbox, so a cold start opens a new one.
 
 ## Part 6: call a classmate's
 
